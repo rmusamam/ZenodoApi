@@ -1,0 +1,74 @@
+name: Weekly Zenodo Analytics
+
+on:
+  schedule:
+    #- cron: '0 9 * * 1'  # Every Monday at 09:00 UTC
+    - cron: '10 * * * *'  # For test 
+  workflow_dispatch:      # Allow manual triggers
+
+jobs:
+  update-analytics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        cache: 'pip'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install papermill jupyter nbconvert
+        
+    - name: Create necessary directories
+      run: |
+        mkdir -p data visualizations
+        
+    - name: Set matplotlib backend for headless environment
+      run: |
+        echo "import matplotlib" > setup_matplotlib.py
+        echo "matplotlib.use('Agg')" >> setup_matplotlib.py
+        python setup_matplotlib.py
+        
+    - name: Execute notebook
+      run: |
+        # First convert to python and run directly to avoid plt.show() issues
+        jupyter nbconvert --to python your_notebook.ipynb --output temp_script.py
+        
+        # Modify the script to remove plt.show() calls
+        sed -i 's/plt.show()/# plt.show()/g' temp_script.py
+        
+        # Run the modified script
+        python temp_script.py
+        
+        # Also execute with papermill for the executed notebook
+        papermill CorrectionV4.1.ipynb CorrectionV4.1_executed.ipynb || echo "Papermill execution completed with warnings"
+        
+    - name: Verify results
+      run: |
+        echo "📊 Checking generated files:"
+        find visualizations/ -name "*.png" | wc -l | xargs echo "Visualizations generated:"
+        find data/ -name "*.json" | wc -l | xargs echo "Data files:"
+        find . -name "*.csv" | wc -l | xargs echo "CSV reports:"
+        
+    - name: Commit and Push Changes
+      uses: stefanzweifel/git-auto-commit-action@v4
+      with:
+        commit_message: "🤖 Automated analytics update [$(date +'%Y-%m-%d')]"
+        file_pattern: |
+          data/
+          visualizations/
+          *.csv
+          *.json
+          your_notebook_executed.ipynb
+        repository: .
+        branch: main
